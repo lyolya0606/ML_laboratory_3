@@ -88,7 +88,7 @@
 ---
 
 В ходе выполениня лабораторной работы были получены приемлемые результаты
-
+Лабораторная подтвердил, что GPT-2  может адаптироваться к стилевым текстов песен.
 # Использованные источники
 - https://developers.sber.ru/help/gigachat-api/large-language-models
 - https://www.ultralytics.com/ru/glossary/lora-low-rank-adaptation#:~:text=LoRA%20(Low%2DRank%20Adaptation)%20%2D%20это%20эффективная%20техника%2C,данных%20без%20переобучения%20всей%20модели.
