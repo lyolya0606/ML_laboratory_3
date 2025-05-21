@@ -26,7 +26,7 @@ def generate_text(model_path, prompt, max_length=100, temperature=0.9, top_k=50,
 
 if __name__ == "__main__":
     # === Настройки ===
-    model_path = "gpt2-lora-sektor-gaza"
+    model_path = "1gpt2-lora-sektor-gaza"
     prompt = "ночь опускается"
     max_length = 400
     temperature = 0.9

@@ -1,10 +1,17 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, DataCollatorForLanguageModeling
-from datasets import load_dataset, Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForLanguageModeling,
+    BitsAndBytesConfig
+)
+from datasets import Dataset
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 import torch
 
 # === Настройки ===
-MODEL_NAME = "gpt2"  # или "tiiuae/falcon-rw-1b" для более сильной модели
+MODEL_NAME = "ai-forever/rugpt3medium_based_on_gpt2"
 TXT_PATH = "sektor_gaza_lyrics_clean.txt"
 OUTPUT_DIR = "gpt2-lora-sektor-gaza"
 
@@ -12,10 +19,12 @@ OUTPUT_DIR = "gpt2-lora-sektor-gaza"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 tokenizer.pad_token = tokenizer.eos_token
 
+quant_config = BitsAndBytesConfig(load_in_8bit=True)
+
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     device_map="auto",
-    load_in_8bit=True  # для экономии памяти
+    quantization_config=quant_config
 )
 
 # === Подготавливаем модель для LoRA ===
@@ -32,39 +41,47 @@ lora_config = LoraConfig(
 
 model = get_peft_model(model, lora_config)
 
-# === Загружаем датасет ===
+# === Чтение и объединение строк по 4 ===
 with open(TXT_PATH, "r", encoding="utf-8") as f:
-    texts = f.read().split("\n\n")
+    lines = [line.strip() for line in f if line.strip()]  # убираем пустые строки
 
-dataset = Dataset.from_dict({"text": texts})
+chunks = ["\n".join(lines[i:i+4]) for i in range(0, len(lines), 4) if len(lines[i:i+4]) == 4]
+
+dataset = Dataset.from_dict({"text": chunks})
+dataset = dataset.select(range(min(len(chunks), 2000)))  # ограничим размер
+
+# === Разбиваем на train/test ===
+split_dataset = dataset.train_test_split(test_size=0.1, seed=42)
+train_dataset = split_dataset["train"]
+eval_dataset = split_dataset["test"]
 
 # === Токенизация ===
 def tokenize(batch):
-    return tokenizer(batch["text"], padding="max_length", truncation=True, max_length=512)
+    return tokenizer(batch["text"], padding="max_length", truncation=True, max_length=256)
 
-tokenized = dataset.map(tokenize, batched=True)
+tokenized_train = train_dataset.map(tokenize, batched=True)
+tokenized_eval = eval_dataset.map(tokenize, batched=True)
+
 data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-# === Обучение ===
+# === Аргументы обучения ===
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
-    # Увеличиваем количество эпох для более глубокого обучения
-    num_train_epochs=60,  # Увеличиваем до 10-20 эпох, в зависимости от времени и ресурсов
-    per_device_train_batch_size=32,  # Если память позволяет, можно увеличить
-    per_device_eval_batch_size=32,
-    logging_dir='./logs',
-    save_strategy="epoch",  # Сохраняем модель после каждой эпохи
-    save_steps=500,  # Сохраняем модель каждые 500 шагов
-    logging_steps=100,  # Логируем прогресс каждые 100 шагов
-    warmup_steps=500,  # Количество шагов для прогрева learning rate
-    # evaluation_strategy="epoch",  # Оценка модели после каждой эпохи
-    learning_rate=5e-5,  # Можно уменьшить learning rate для стабильности
-    weight_decay=0.01,  # Для предотвращения переобучения
+    num_train_epochs=3,
+    learning_rate=8e-5,
+    logging_dir="./logs",
+    logging_steps=20,
+    eval_strategy="epoch",
+    save_strategy="no",
+    load_best_model_at_end=False,
+    overwrite_output_dir=True
 )
 
+# === Обучение ===
 trainer = Trainer(
     model=model,
-    train_dataset=tokenized,
+    train_dataset=tokenized_train,
+    eval_dataset=tokenized_eval,
     args=training_args,
     tokenizer=tokenizer,
     data_collator=data_collator
@@ -72,6 +89,6 @@ trainer = Trainer(
 
 trainer.train()
 
-# Сохраняем модель и токенизатор
+# === Сохраняем модель и токенизатор ===
 model.save_pretrained(OUTPUT_DIR)
 tokenizer.save_pretrained(OUTPUT_DIR)

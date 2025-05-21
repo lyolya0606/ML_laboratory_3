@@ -1,5 +1,5 @@
 ---
-base_model: gpt2
+base_model: ai-forever/rugpt3medium_based_on_gpt2
 library_name: peft
 ---
 
